@@ -1,0 +1,80 @@
+terraform {
+  required_providers {
+    google = {
+      source = "hashicorp/google"
+      # Keep your existing provider version constraint here, if you have one.
+    }
+  }
+}
+
+provider "google" {
+  project = var.project_id
+  region  = var.region
+}
+
+resource "google_compute_network" "vpc_network" {
+  name = var.terraform_network_name
+}
+
+# Create the server VM.
+resource "google_compute_instance" "server" {
+  name         = var.vm_name
+  machine_type = "e2-medium"
+  zone         = var.zone
+
+  tags = [local.http_tag]
+
+  boot_disk {
+    # Delete the boot disk when this VM is deleted.
+    auto_delete = true
+
+    initialize_params {
+      image = "debian-cloud/debian-13"
+      type  = "pd-ssd"
+      size  = 10
+
+      # Do not attach a snapshot schedule to the boot disk.
+      resource_policies = []
+    }
+  }
+
+  network_interface {
+    network = local.network_name
+
+    # Allocate an ephemeral external IPv4 address.
+    access_config {}
+  }
+
+  # No Backup and DR plan is created or associated by this configuration.
+}
+
+# Equivalent network access to selecting "Allow HTTP traffic".
+resource "google_compute_firewall" "allow_http" {
+  name        = "${var.vm_name}-allow-http"
+  description = "Allow public HTTP access to ${var.vm_name}"
+  network     = local.network_name
+
+  direction = "INGRESS"
+  priority  = 1000
+
+  allow {
+    protocol = "tcp"
+    ports    = ["80"]
+  }
+
+  # Allow connections from any IPv4 address.
+  source_ranges = ["0.0.0.0/0"]
+
+  # Apply this rule only to VMs with the matching network tag.
+  target_tags = [local.http_tag]
+}
+
+output "vm_name" {
+  description = "Name of the created VM."
+  value       = google_compute_instance.server.name
+}
+
+output "vm_external_ip" {
+  description = "Ephemeral external IPv4 address of the VM."
+  value       = google_compute_instance.server.network_interface[0].access_config[0].nat_ip
+}
